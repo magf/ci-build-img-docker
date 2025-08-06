@@ -31,8 +31,10 @@ runs:
       # Clone repository without submodules
       git clone https://github.com/${GITHUB_REPOSITORY}.git /workspace
       cd /workspace
+      # DEBUG
+      env
       # Checkout the specific commit
-      git checkout ${GITHUB_SHA}
+      git checkout ${GITHUB_HEAD_REF}
       # Debug: Show submodules being initialized
       echo "Initializing submodules"
       # Initialize and update submodules recursively
