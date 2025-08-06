@@ -23,16 +23,18 @@ runs:
     - -c
     - |
       # Exit on any error
-      set -e
+      set -ex
       # Install dependencies for git, curl, and jq
       apk add --no-cache git curl jq
-      # Configure Git to use GITHUB_TOKEN for submodules
-      git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com".insteadOf "https://github.com"
+      # Debug: Show repository being cloned
+      echo "Cloning repository: ${GITHUB_REPOSITORY}"
       # Clone repository without submodules
-      git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git /workspace
+      git clone https://github.com/${GITHUB_REPOSITORY}.git /workspace
       cd /workspace
       # Checkout the specific commit
       git checkout ${GITHUB_SHA}
+      # Debug: Show submodules being initialized
+      echo "Initializing submodules"
       # Initialize and update submodules recursively
       git submodule update --init --recursive
       git fetch --tags --force
