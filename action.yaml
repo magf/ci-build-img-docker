@@ -26,11 +26,16 @@ runs:
       set -e
       # Install dependencies for git, curl, and jq
       apk add --no-cache git curl jq
-      # Clone repository with submodules and full history
-      git clone --recursive https://github.com/${GITHUB_REPOSITORY}.git /workspace
+      # Configure Git to use GITHUB_TOKEN for submodules
+      git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com".insteadOf "https://github.com"
+      # Clone repository without submodules
+      git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git /workspace
       cd /workspace
-      git fetch --tags --force
+      # Checkout the specific commit
       git checkout ${GITHUB_SHA}
+      # Initialize and update submodules recursively
+      git submodule update --init --recursive
+      git fetch --tags --force
       # Set up Docker Buildx for multi-platform builds
       docker buildx create --use
       # Login to GHCR if running in a PR and same repository
