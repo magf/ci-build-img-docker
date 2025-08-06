@@ -22,10 +22,12 @@ runs:
     - /bin/sh
     - -c
     - |
+      # Exit on any error
+      set -e
       # Install dependencies for git, curl, and jq
       apk add --no-cache git curl jq
       # Clone repository with submodules and full history
-      git clone --recursive --depth=0 https://github.com/${GITHUB_REPOSITORY}.git /workspace
+      git clone --recursive https://github.com/${GITHUB_REPOSITORY}.git /workspace
       cd /workspace
       git fetch --tags --force
       git checkout ${GITHUB_SHA}
@@ -41,11 +43,6 @@ runs:
       docker build --tag ${IMAGE}:${GITHUB_SHA} -f ci/Dockerfile.${{ inputs.target_os }}${{ inputs.target_os_version }} .
       # Save image to a tar file for caching
       docker save ${IMAGE}:${GITHUB_SHA} > ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar
-      # Clear existing cache to avoid stale entries
-      curl -X DELETE \
-        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/caches?key=ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}" || true
       # Move image to cache directory
       mkdir -p /github/cache
       mv ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar /github/cache/
