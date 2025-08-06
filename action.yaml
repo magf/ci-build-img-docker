@@ -1,0 +1,58 @@
+name: CI Build Image Docker
+description: Builds and caches Docker images for Greengage CI pipelines. Supports versioned OS configurations, tags images with commit SHA, and pushes to GHCR for PRs. Ideal for CI/CD workflows requiring containerized environments.
+inputs:
+  version:
+    description: 'Greengage version (e.g., 6 or 7)'
+    required: true
+  target_os:
+    description: 'Target operating system (e.g., ubuntu, centos)'
+    required: true
+  target_os_version:
+    description: 'Target OS version (e.g., 20, 7)'
+    required: false
+    default: ''
+  python3:
+    description: 'Python3 build argument for the Dockerfile'
+    required: false
+    default: ''
+runs:
+  using: 'docker'
+  image: 'docker://docker:24.0'
+  args:
+    - /bin/sh
+    - -c
+    - |
+      # Install dependencies for git, curl, and jq
+      apk add --no-cache git curl jq
+      # Clone repository with submodules and full history
+      git clone --recursive --depth=0 https://github.com/${GITHUB_REPOSITORY}.git /workspace
+      cd /workspace
+      git fetch --tags --force
+      git checkout ${GITHUB_SHA}
+      # Set up Docker Buildx for multi-platform builds
+      docker buildx create --use
+      # Login to GHCR if running in a PR and same repository
+      if [ -n "${GITHUB_HEAD_REF}" ] && [ "${GITHUB_REPOSITORY}" = "${GITHUB_EVENT_REPOSITORY_FULL_NAME}" ]; then
+        echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      fi
+      # Build Docker image with specified version and OS
+      IMAGE=ghcr.io/${GITHUB_REPOSITORY}/ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}
+      IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+      docker build --tag ${IMAGE}:${GITHUB_SHA} -f ci/Dockerfile.${{ inputs.target_os }}${{ inputs.target_os_version }} .
+      # Save image to a tar file for caching
+      docker save ${IMAGE}:${GITHUB_SHA} > ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar
+      # Clear existing cache to avoid stale entries
+      curl -X DELETE \
+        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/caches?key=ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}" || true
+      # Move image to cache directory
+      mkdir -p /github/cache
+      mv ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar /github/cache/
+      # Push developer's tag image if PR and same repository
+      if [ -n "${GITHUB_HEAD_REF}" ] && [ "${GITHUB_REPOSITORY}" = "${GITHUB_EVENT_REPOSITORY_FULL_NAME}" ]; then
+        DEV_TAG=$(echo "${GITHUB_HEAD_REF}" | sed 's/[^a-zA-Z0-9._-]/_/g')
+        docker tag ${IMAGE}:${GITHUB_SHA} ${IMAGE}:${DEV_TAG:-unknown}
+        docker push ${IMAGE}:${GITHUB_SHA}
+        docker push ${IMAGE}:${DEV_TAG:-unknown}
+      fi
