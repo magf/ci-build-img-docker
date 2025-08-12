@@ -24,8 +24,8 @@ runs:
     - |
       # Exit on any error
       set -ex
-      # Install dependencies for git, curl, and jq
-      apk add --no-cache git curl jq
+      # Install dependencies for git, curl, jq and gzip
+      apk add --no-cache git curl jq gzip
       # Debug: Show repository being cloned
       echo "Cloning repository: ${GITHUB_REPOSITORY}"
       # Clone repository without submodules
@@ -42,21 +42,63 @@ runs:
       git fetch --tags --force
       # Set up Docker Buildx for multi-platform builds
       docker buildx create --use
-      # Login to GHCR if running in a PR and same repository
-      if [ -n "${GITHUB_HEAD_REF}" ] && [ "${GITHUB_REPOSITORY}" = "${GITHUB_EVENT_REPOSITORY_FULL_NAME}" ]; then
-        echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      fi
       # Build Docker image with specified version and OS
       IMAGE=ghcr.io/${GITHUB_REPOSITORY}/ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}
       IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
       docker build --tag ${IMAGE}:${GITHUB_SHA} -f ci/Dockerfile.${{ inputs.target_os }}${{ inputs.target_os_version }} .
       # Save image to a tar file for caching
       docker save ${IMAGE}:${GITHUB_SHA} > ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar
-      # Move image to cache directory
-      mkdir -p /github/cache
-      mv ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar /github/cache/
-      # Push developer's tag image if PR and same repository
+      # Compress and cache the Docker image
+      gzip ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar
+      CACHE_FILE="ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar.gz"
+      
+      # Determine branch name for cache key
+      if [ -n "${GITHUB_HEAD_REF}" ]; then
+          branch_name=${GITHUB_HEAD_REF}
+      else
+          branch_name=${GITHUB_REF_NAME}
+      fi
+      
+      # Generate safe cache key (alphanumeric + ._- only)
+      CACHE_KEY="ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${{ github.sha }}"
+      # CACHE_KEY=$(echo "$CACHE_KEY" | sed 's/[^a-zA-Z0-9._-]/_/g')
+      
+      # Prepare API request
+      OWNER_REPO=${GITHUB_REPOSITORY}
+      URL="https://api.github.com/repos/${OWNER_REPO}/actions/caches"
+      
+      # Create cache entry
+      response=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+                    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    -X POST \
+                    -d "{\"key\":\"${CACHE_KEY}\", \"version\":\"${GITHUB_SHA}\"}" \
+                    "${URL}")
+      
+      # Handle API response
+      if echo "$response" | jq -e '.errors' > /dev/null; then
+          echo "Error creating cache: $(echo "$response" | jq -c '.errors')"
+      else
+          upload_url=$(echo "$response" | jq -r '.upload_url')
+          if [ -z "$upload_url" ] || [ "$upload_url" = "null" ]; then
+              echo "Failed to get upload URL. Response: $response"
+          else
+              echo "Uploading cache file to $upload_url"
+              curl -X PUT -H "Content-Type: application/octet-stream" \
+                   --data-binary @"$CACHE_FILE" \
+                   "$upload_url"
+              if [ $? -eq 0 ]; then
+                  echo "Cache uploaded successfully"
+              else
+                  echo "Cache upload failed"
+              fi
+          fi
+      fi
+
+      # If PR and same repository
       if [ -n "${GITHUB_HEAD_REF}" ] && [ "${GITHUB_REPOSITORY}" = "${GITHUB_EVENT_REPOSITORY_FULL_NAME}" ]; then
+        # Login to GHCR if running in a PR and same repository
+        echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+        # Push developer's tag image
         DEV_TAG=$(echo "${GITHUB_HEAD_REF}" | sed 's/[^a-zA-Z0-9._-]/_/g')
         docker tag ${IMAGE}:${GITHUB_SHA} ${IMAGE}:${DEV_TAG:-unknown}
         docker push ${IMAGE}:${GITHUB_SHA}
