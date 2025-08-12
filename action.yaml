@@ -42,15 +42,18 @@ runs:
       git fetch --tags --force
       # Set up Docker Buildx for multi-platform builds
       docker buildx create --use
+      # Presets
+      export NAME="ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}"
+      export CACHE_KEY="${NAME}_${GITHUB_SHA}"
+      IMAGE=ghcr.io/${GITHUB_REPOSITORY}/${NAME}
+      export IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
       # Build Docker image with specified version and OS
-      IMAGE=ghcr.io/${GITHUB_REPOSITORY}/ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}
-      IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
       docker build --tag ${IMAGE}:${GITHUB_SHA} -f ci/Dockerfile.${{ inputs.target_os }}${{ inputs.target_os_version }} .
       # Save image to a tar file for caching
-      docker save ${IMAGE}:${GITHUB_SHA} > ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar
+      docker save ${IMAGE}:${GITHUB_SHA} > ${CACHE_KEY}.tar
       # Compress and cache the Docker image
-      gzip ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar
-      CACHE_FILE="ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${GITHUB_SHA}.tar.gz"
+      gzip ${CACHE_KEY}.tar
+      CACHE_FILE="${CACHE_KEY}.tar.gz"
       
       # Determine branch name for cache key
       if [ -n "${GITHUB_HEAD_REF}" ]; then
@@ -58,10 +61,6 @@ runs:
       else
           branch_name=${GITHUB_REF_NAME}
       fi
-      
-      # Generate safe cache key (alphanumeric + ._- only)
-      CACHE_KEY="ggdb${{ inputs.version }}_${{ inputs.target_os }}${{ inputs.target_os_version }}_${{ github.sha }}"
-      # CACHE_KEY=$(echo "$CACHE_KEY" | sed 's/[^a-zA-Z0-9._-]/_/g')
       
       # Prepare API request
       OWNER_REPO=${GITHUB_REPOSITORY}
