@@ -49,8 +49,8 @@ runs:
       # Build Docker image with specified version and OS
       docker build --tag ${IMAGE}:${GITHUB_SHA} -f ci/Dockerfile.${{ inputs.target_os }}${{ inputs.target_os_version }} .
       # Save image to a tar file for caching
-      docker save ${IMAGE}:${GITHUB_SHA} > ${NAME}_${GITHUB_SHA}.tar
-      
+      docker save ${IMAGE}:${GITHUB_SHA} > ${GITHUB_WORKSPACE}/${NAME}_${GITHUB_SHA}.tar
+
       # If PR and same repository
       if [ -n "${GITHUB_HEAD_REF}" ] && [ "${GITHUB_REPOSITORY}" = "${GITHUB_EVENT_REPOSITORY_FULL_NAME}" ]; then
         # Login to GHCR if running in a PR and same repository
